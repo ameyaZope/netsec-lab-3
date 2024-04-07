@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 )
@@ -31,6 +32,37 @@ func main() {
 	fmt.Printf("KeyFileName : %s\n", *keyFileName)
 	if *listenPort == -1 {
 		fmt.Printf("Client Mode\n")
+
+		conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", destHost, destPort))
+		if err != nil {
+			log.Fatalf("Dial failed: %v", err)
+		}
+		defer conn.Close()
+
+		// Using WaitGroup to manage goroutines completion
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// Goroutine for copying server responses to stdout
+		go func() {
+			defer wg.Done()
+			_, err := io.Copy(os.Stdout, conn)
+			if err != nil {
+				log.Printf("Error relaying data from server to stdout: %v", err)
+			}
+		}()
+
+		// Goroutine for reading from stdin and sending to the server
+		go func() {
+			defer wg.Done()
+			_, err := io.Copy(conn, os.Stdin)
+			if err != nil {
+				log.Printf("Error reading from stdin and writing to server: %v", err)
+			}
+		}()
+
+		// Wait for both goroutines to finish
+		wg.Wait()
 	} else {
 		listener, err := net.Listen("tcp", ":"+fmt.Sprintf("%d", *listenPort))
 		if err != nil {
