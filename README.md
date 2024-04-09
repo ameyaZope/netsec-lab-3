@@ -1,5 +1,12 @@
 # JumpProxy in Golang
 
+### TCP Communication over the Jump Proxy
+You need to create three things with the below code
+
+1. TCP Server
+2. Jump proxy server
+3. Jump proxy client
+   
 #### Creating TCP server via telnet
 
 ```bash
@@ -18,6 +25,16 @@ do
   nc -v -lk -p 9090
 done
 
+```
+
+#### Jump Proxy Server Command
+```bash
+go run jumproxy.go -k test.txt -l 2222 localhost 9090
+```
+
+#### Jump Proxy Client Command
+```bash
+go run jumproxy.go -k test.txt <dstHost> <dstPort>
 ```
 
 #### Creating SSH Jump Proxy Via Telnet
