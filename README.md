@@ -8,7 +8,6 @@ You need to create three things with the below code
 3. Jump proxy client
    
 #### Creating TCP server via telnet
-
 ```bash
 #!/bin/bash
 
@@ -67,3 +66,11 @@ ssh -J vboxuser@172.24.24.100:2222 vboxuser@localhost
 go run jumproxy.go -k mykey1 -l 2222 localhost 22
 ```
 ####
+
+#### Need for Replacement for nc
+Please note that the problem with a TCP servier using nc is that it inherently does not handle multiple tcp connections. The second TCP connection will be rejected (assuming that there is already one ongoing TCP connection). The solution for this is to use **socat** command. The problem with socat is that it is not inherently built for a two way communication that I am looking for. A better solution is to use **ncat**. ncat is the modern version of netcat which can handle multiple connections, ssl and many other modern features. 
+
+```bash
+ncat -lkv 9090
+```
+
