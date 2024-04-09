@@ -21,3 +21,5 @@
 go.work
 
 jumproxy
+large_file*
+run

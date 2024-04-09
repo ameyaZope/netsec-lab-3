@@ -74,3 +74,17 @@ Please note that the problem with a TCP servier using nc is that it inherently d
 ncat -lkv 9090
 ```
 
+#### Generating large file
+I have created two programs to create large files with alphanumerica characters, the cpp one works way faster, just use it. Below are the copmmands that work for me on MacOS
+
+For running cpp code
+```bash
+g++-12 -o run create_large_file.cpp
+./run
+```
+
+For running python code
+```bash
+python3 create_large_file.py
+```
+
