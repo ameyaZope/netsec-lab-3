@@ -82,6 +82,7 @@ func decrypt(ciphertext []byte, key []byte, nonce []byte) ([]byte, error) {
 func sendEncrypted(conn net.Conn, data []byte, key []byte) error {
 	ciphertext, nonce, errEncrypt := encrypt(data, key)
 	if errEncrypt != nil {
+		log.Printf("[sendEncrypted] %v", errEncrypt);
 		return errEncrypt
 	}
 	// Assuming a simple protocol: send the nonce size, nonce, and then ciphertext.
@@ -119,7 +120,6 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 	nonceSizeBuf := make([]byte, 8)
 	_, errReadNonceSize := conn.Read(nonceSizeBuf)
 	nonceSize := int64(binary.BigEndian.Uint64(nonceSizeBuf))
-	log.Printf("[reciveDecrypted] Recieved NonceSize %d\n", nonceSize)
 	if errReadNonceSize != nil {
 		log.Printf("[recieveDecrypt] Error Reading NonceSize : %v\n", errReadNonceSize)
 		return nil, errReadNonceSize
@@ -127,7 +127,6 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 
 	nonce := make([]byte, nonceSize)
 	_, errReadNonce := conn.Read(nonce)
-	log.Printf("[reciveDecrypted] Recieved NonceSize %x\n", nonce)
 	if errReadNonce != nil {
 		log.Printf("[recieveDecrypt] Error Reading Nonce : %v\n", errReadNonce)
 		return nil, errReadNonce
@@ -136,7 +135,6 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 	cipherTextSizeBuf := make([]byte, 8)
 	_, errReadCipherTextSize := conn.Read(cipherTextSizeBuf)
 	cipherTextSize := int64(binary.BigEndian.Uint64(cipherTextSizeBuf))
-	log.Printf("[reciveDecrypted] Recieved CipherTextSize %d\n", cipherTextSize)
 	if errReadCipherTextSize != nil {
 		log.Printf("[recieveDecrypt] Error Reading CipherTextSize : %v\n", errReadCipherTextSize)
 		return nil, errReadCipherTextSize
@@ -145,7 +143,6 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 	// Assuming the remaining data is the ciphertext. In practice, you might want to prefix the data with its size.
 	ciphertext := make([]byte, cipherTextSize)
 	n, errReadCipherText := conn.Read(ciphertext)
-	log.Printf("[reciveDecrypted] Recieved CipherText %x\n", ciphertext)
 	if errReadCipherText != nil {
 		log.Printf("[recieveDecrypt] Error Reading CipherText : %v\n", errReadCipherText)
 		return nil, errReadCipherText
@@ -214,7 +211,6 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for {
-				log.Printf("Client: key = %x\n", key)
 				plaintext, errRecieveDecrypt := receiveDecrypted(conn, key)
 				if errRecieveDecrypt != nil || errRecieveDecrypt == io.EOF {
 					break
@@ -227,7 +223,6 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for {
-				log.Printf("Client : Awaiting Input From Stdin\n")
 				reader := bufio.NewReader(os.Stdin)
 				plaintext, errReadBytes := reader.ReadBytes('\n')
 				if errReadBytes != nil {
@@ -235,7 +230,6 @@ func main() {
 					break
 				}
 				sendEncrypted(conn, plaintext, key)
-				log.Printf("Client : Sent Encrpyted Input to Server %s\n", plaintext)
 			}
 		}()
 
@@ -265,58 +259,99 @@ func main() {
 	}
 }
 
+func safeClose(channel chan struct{}) {
+	select {
+	case <-channel:
+		// Channel already closed
+	default:
+		close(channel)
+	}
+}
+
 func handleClient(clientConn net.Conn, destHost string, destPort int64, passphrase []byte) {
 	serviceConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", destHost, destPort))
 	if err != nil {
-		log.Fatalf("Failed to connect to service: %v", err)
+		log.Printf("Failed to connect to service: %v", err)
+		clientConn.Close()
+		return
 	}
 	key, keyError := hex.DecodeString("186c82651c0d565e6d56541fc614036d33e857a143d44f915cca44e3687694ee")
 	if keyError != nil {
-		log.Fatalf("Proxy: Error Generating Key %v", keyError)
+		log.Printf("Proxy: Error Generating Key %v", keyError)
+		clientConn.Close()
+		serviceConn.Close()
+		return
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	exitSignal := make(chan struct{})
+	exitConfirm := make(chan struct{}, 2)
+
 	// Accept data from client to service
 	go func() {
-		defer wg.Done()
+		defer func() {
+			clientConn.Close()
+			serviceConn.Close()
+			exitConfirm <- struct{}{} // Confirm this goroutine's exit
+		}()
 		for {
-			log.Printf("Proxy : Awaiting Data From Client\n")
-			plaintext, errRecieveDecrypt := receiveDecrypted(clientConn, key)
-			if errRecieveDecrypt != nil || errRecieveDecrypt == io.EOF {
-				log.Fatal("Proxy [ERROR] [Recieve Data from Client]: %v", errRecieveDecrypt)
-				break
+			select {
+			case <-exitSignal: // Received exit signal from goroutine 2
+				return
+			default:
+				log.Printf("Proxy : Awaiting Data From Client\n")
+				plaintext, errRecieveDecrypt := receiveDecrypted(clientConn, key)
+				if errRecieveDecrypt == io.EOF {
+					log.Printf("EOF Recieved breaking client reader")
+					safeClose(exitSignal)
+					break
+				}
+				if errRecieveDecrypt != nil {
+					log.Printf("Proxy [ERROR] [Recieve Data from Client]: %v", errRecieveDecrypt)
+					break
+				}
+				log.Printf("Proxy : Recieved %s from service\n", plaintext)
+				n, err := serviceConn.Write(plaintext)
+				if err != nil {
+					log.Printf("[ERROR] Proxy Client to Proxy: %v\n", err)
+					break
+				} else {
+					log.Printf("Wrote %d bytes", n)
+				}
+				log.Printf("Proxy : Sent %s to service\n", plaintext)
 			}
-			log.Printf("Proxy : Recieved %s from service\n", plaintext)
-			n, err := serviceConn.Write(plaintext)
-			if err != nil {
-				log.Fatal("[ERROR] Proxy Client to Proxy: %v\n", err)
-			} else {
-				log.Printf("Wrote %d bytes", n)
-			}
-			log.Printf("Proxy : Sent %s to service\n", plaintext)
 		}
-
 	}()
 
 	// Send data from service to client
 	go func() {
-		defer wg.Done()
+		defer func() {
+			exitConfirm <- struct{}{} // Confirm this goroutine's exit
+		}()
 		for {
-			log.Printf("Proxy : Awaiting Data From Service\n")
-			reader := bufio.NewReader(serviceConn)
-			plaintext, err := reader.ReadBytes('\n')
-			if err != nil {
-				log.Printf("[ERROR] Proxy Error Reading Data From Service : %v\n", err)
+			select {
+			case <-exitSignal: // Received exit signal from goroutine 1
+				return
+			default:
+				log.Printf("Proxy : Awaiting Data From Service\n")
+				reader := bufio.NewReader(serviceConn)
+				plaintext, err := reader.ReadBytes('\n')
+				if err == io.EOF {
+					log.Printf("EOF Recieved Breaking Service Reader\n")
+					safeClose(exitSignal)
+					break
+				}
+				if err != nil {
+					log.Printf("[ERROR] Proxy Error Reading Data From Service : %v\n", err)
+					break
+				}
+				log.Printf("Proxy : Recieved %s from Service\n", plaintext)
+				sendEncrypted(clientConn, plaintext, key)
+				log.Printf("Proxy : Sent %s to client in encrypted form\n", plaintext)
 			}
-			log.Printf("Proxy : Recieved %s from Service\n", plaintext)
-			sendEncrypted(clientConn, plaintext, key)
-			log.Printf("Proxy : Sent %s to client in encrypted form\n", plaintext)
 		}
 	}()
 
-	wg.Wait()
+	<-exitConfirm
+	<-exitConfirm
 	log.Printf("Proxy : Closing Service and Client Connections\n")
-	serviceConn.Close()
-	clientConn.Close()
 }
