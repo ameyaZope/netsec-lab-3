@@ -82,17 +82,10 @@ func decrypt(ciphertext []byte, key []byte, nonce []byte) ([]byte, error) {
 func sendEncrypted(conn net.Conn, data []byte, key []byte) error {
 	ciphertext, nonce, errEncrypt := encrypt(data, key)
 	if errEncrypt != nil {
-		log.Printf("[sendEncrypted] %v", errEncrypt);
+		log.Printf("[sendEncrypted] %v", errEncrypt)
 		return errEncrypt
 	}
-	// Assuming a simple protocol: send the nonce size, nonce, and then ciphertext.
-	nonceSizeBuf := make([]byte, 8)
-	binary.BigEndian.PutUint64(nonceSizeBuf, uint64(len(nonce)))
-	_, errWriteNonceSize := conn.Write(nonceSizeBuf)
-	if errWriteNonceSize != nil {
-		log.Printf("Client [ERROR] Writing NonceSize: %v\n", errWriteNonceSize)
-		return errWriteNonceSize
-	}
+	// Assuming a simple protocol: send the nonce assuming 12 byte nonce, cipherTextSize, ciphertext.
 	_, errWriteNonce := conn.Write(nonce)
 	if errWriteNonce != nil {
 		log.Printf("Client [ERROR] Writing Nonce: %v\n", errWriteNonce)
@@ -100,8 +93,8 @@ func sendEncrypted(conn net.Conn, data []byte, key []byte) error {
 	}
 
 	cipherTextSize := len(ciphertext)
-	sizeBuf := make([]byte, 8)
-	binary.BigEndian.PutUint64(sizeBuf, uint64(cipherTextSize))
+	sizeBuf := make([]byte, 2)
+	binary.BigEndian.PutUint16(sizeBuf, uint16(cipherTextSize))
 	_, errWriteCipherTextSize := conn.Write(sizeBuf)
 	if errWriteCipherTextSize != nil {
 		log.Printf("Client [ERROR] Writing CipherTextSize: %v\n", errWriteCipherTextSize)
@@ -117,24 +110,17 @@ func sendEncrypted(conn net.Conn, data []byte, key []byte) error {
 
 // Reads encrypted data, extracts the nonce, and decrypts the data.
 func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
-	nonceSizeBuf := make([]byte, 8)
-	_, errReadNonceSize := conn.Read(nonceSizeBuf)
-	nonceSize := int64(binary.BigEndian.Uint64(nonceSizeBuf))
-	if errReadNonceSize != nil {
-		log.Printf("[recieveDecrypt] Error Reading NonceSize : %v\n", errReadNonceSize)
-		return nil, errReadNonceSize
-	}
 
-	nonce := make([]byte, nonceSize)
+	nonce := make([]byte, 12) //assuming that nonce size is 12 bytes
 	_, errReadNonce := conn.Read(nonce)
 	if errReadNonce != nil {
 		log.Printf("[recieveDecrypt] Error Reading Nonce : %v\n", errReadNonce)
 		return nil, errReadNonce
 	}
 
-	cipherTextSizeBuf := make([]byte, 8)
+	cipherTextSizeBuf := make([]byte, 2)
 	_, errReadCipherTextSize := conn.Read(cipherTextSizeBuf)
-	cipherTextSize := int64(binary.BigEndian.Uint64(cipherTextSizeBuf))
+	cipherTextSize := uint16(binary.BigEndian.Uint16(cipherTextSizeBuf))
 	if errReadCipherTextSize != nil {
 		log.Printf("[recieveDecrypt] Error Reading CipherTextSize : %v\n", errReadCipherTextSize)
 		return nil, errReadCipherTextSize
@@ -211,8 +197,11 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for {
+				log.Printf("[Client] Awaiting Data From proxy")
 				plaintext, errRecieveDecrypt := receiveDecrypted(conn, key)
+				log.Printf("[Client] Recieved from Proxy %s", string(plaintext))
 				if errRecieveDecrypt != nil || errRecieveDecrypt == io.EOF {
+					log.Printf("[Client] errRecieveDecrypt : %v", errRecieveDecrypt)
 					break
 				}
 				os.Stdout.Write(plaintext)
@@ -222,14 +211,20 @@ func main() {
 		// Goroutine for reading from stdin and sending to the server
 		go func() {
 			defer wg.Done()
+			reader := bufio.NewReader(os.Stdin)
+			
 			for {
-				reader := bufio.NewReader(os.Stdin)
-				plaintext, errReadBytes := reader.ReadBytes('\n')
+				log.Printf("[Client] Awaiting Data From User/Process to Send to Proxy")
+				plaintext := make([]byte, 1024)
+				numBytesRead, errReadBytes := reader.Read(plaintext)
+				log.Printf("[Client] Sending to Proxy: %s", string(plaintext))
 				if errReadBytes != nil {
 					log.Printf("Client [ERROR] [Reading Input From Stdin] : %v", errReadBytes)
 					break
 				}
+				plaintext = plaintext[0:numBytesRead]
 				sendEncrypted(conn, plaintext, key)
+				log.Printf("[Client] Sent to Proxy: %s", string(plaintext))
 			}
 		}()
 
@@ -286,7 +281,7 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 	exitSignal := make(chan struct{})
 	exitConfirm := make(chan struct{}, 2)
 
-	// Accept data from client to service
+	// Accept data from client to proxy-service
 	go func() {
 		defer func() {
 			clientConn.Close()
@@ -327,14 +322,16 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 		defer func() {
 			exitConfirm <- struct{}{} // Confirm this goroutine's exit
 		}()
+
+		reader := bufio.NewReader(serviceConn)
 		for {
 			select {
 			case <-exitSignal: // Received exit signal from goroutine 1
 				return
 			default:
 				log.Printf("Proxy : Awaiting Data From Service\n")
-				reader := bufio.NewReader(serviceConn)
-				plaintext, err := reader.ReadBytes('\n')
+				plaintext :=make([]byte, 1024)
+				numBytesRead, err := reader.Read(plaintext)
 				if err == io.EOF {
 					log.Printf("EOF Recieved Breaking Service Reader\n")
 					safeClose(exitSignal)
@@ -344,9 +341,10 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 					log.Printf("[ERROR] Proxy Error Reading Data From Service : %v\n", err)
 					break
 				}
-				log.Printf("Proxy : Recieved %s from Service\n", plaintext)
+				plaintext = plaintext[0:numBytesRead]
+				log.Printf("Proxy : Recieved %s from Service\n", string(plaintext))
 				sendEncrypted(clientConn, plaintext, key)
-				log.Printf("Proxy : Sent %s to client in encrypted form\n", plaintext)
+				log.Printf("Proxy : Sent %s to client in encrypted form\n", string(plaintext))
 			}
 		}
 	}()
