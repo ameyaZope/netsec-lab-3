@@ -19,10 +19,20 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
+const (
+	SALT_LENGTH int = 16
+	NONCE_LENGTH int = 12
+	KEY_LENGTH int = 32
+)
+
+const (
+	PLAINTEXT_BLOCK_SIZE int = 1024
+)
+
 func generateKey(secret []byte, saltInput []byte) ([]byte, []byte) {
 	var salt []byte
 	if saltInput == nil {
-		salt = make([]byte, 16)
+		salt = make([]byte, SALT_LENGTH)
 		_, err := rand.Read(salt)
 		if err != nil {
 			log.Fatalf("Error During Salt Generation for Key Generation %v", err)
@@ -31,7 +41,7 @@ func generateKey(secret []byte, saltInput []byte) ([]byte, []byte) {
 		salt = saltInput
 	}
 
-	key := pbkdf2.Key(secret, salt, 4096, 32, sha256.New) // 256-bit key
+	key := pbkdf2.Key(secret, salt, 4096, KEY_LENGTH, sha256.New) // 256-bit key
 	return key, salt
 }
 
@@ -110,7 +120,7 @@ func sendEncrypted(conn net.Conn, data []byte, key []byte) error {
 // Reads encrypted data, extracts the nonce, and decrypts the data.
 func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 
-	nonce := make([]byte, 12) //assuming that nonce size is 12 bytes
+	nonce := make([]byte, NONCE_LENGTH) //assuming that nonce size is 12 bytes
 	_, errReadNonce := io.ReadFull(conn, nonce)
 	if errReadNonce != nil {
 		log.Printf("[recieveDecrypt] Error Reading Nonce : %v\n", errReadNonce)
@@ -229,7 +239,7 @@ func main() {
 
 			for {
 				log.Printf("[Client] Awaiting Data From User/Process to Send to Proxy")
-				plaintext := make([]byte, 1024)
+				plaintext := make([]byte, PLAINTEXT_BLOCK_SIZE)
 				numBytesRead, errReadBytes := reader.Read(plaintext)
 				if errReadBytes != nil {
 					log.Printf("Client [ERROR] [Reading Input From Stdin] : %v", errReadBytes)
@@ -284,7 +294,7 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 		clientConn.Close()
 		return
 	}
-	salt := make([]byte, 16)
+	salt := make([]byte, SALT_LENGTH)
 	_, errReadSalt := io.ReadFull(clientConn, salt)
 	if errReadSalt != nil {
 		log.Printf("[Proxy] Unable to read salt sent by client: %v", errReadSalt)
@@ -343,7 +353,7 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 				return
 			default:
 				log.Printf("[Proxy] Awaiting Data From Service\n")
-				plaintext := make([]byte, 1024)
+				plaintext := make([]byte, PLAINTEXT_BLOCK_SIZE)
 				numBytesRead, err := reader.Read(plaintext)
 				if err == io.EOF {
 					log.Printf("[Proxy] EOF Recieved Breaking Service Reader\n")
