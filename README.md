@@ -93,6 +93,9 @@ This project is a classical example of how to implement an application layer pro
 
 ### Protocol
 
+#### Key Generation from passphrase and handling Salt
+The key is generated using pbkdf2 package. We provide the passphrase and a randomly generated salt to the pbkdf2 package and it generates the key for us. Client is the first one to generate the key and hence, it is the one who generates the salt as well. The salt is a SALT_LENGTH byte sequence that is sent in plaintext as the first 16 bytes of the tcp communication. As soon as the client generates the salt, it writes the first 16 bytes of the communication as the salt. The server on the other hand, interprets the first 16 bytes of the tcp communication as the salt and uses this salt along with the pre set passphrase to generate the key. 
+
 #### Client to Proxy-Client
 Below we define the reading strategy at client side and then in the third step we define the strategy to send packets to Proxy-Client
 1. Read 1024 bytes max from the input(stdin). Get the number of bytes read as numBytesRead
