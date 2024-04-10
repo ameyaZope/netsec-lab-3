@@ -143,6 +143,16 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 }
 
 func main() {
+	logFile, errOpenLogFile := os.OpenFile("proxy-application.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if errOpenLogFile != nil {
+		fmt.Printf("error opening log file: %v", errOpenLogFile)
+		os.Exit(1) // Exit if we cannot open the log file
+	}
+	defer logFile.Close()
+
+	// Set the output of the standard logger to the log file
+	log.SetOutput(logFile)
+
 	var keyFileName = flag.String("k", "mykey", "Use the ASCII text passphrase contained in <pwdfile>")
 	var listenPort = flag.Int("l", -1, "Reverse-proxy mode: listen for inbound connections on <listenport> and relay them to <destination>:<port>")
 
@@ -212,7 +222,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			reader := bufio.NewReader(os.Stdin)
-			
+
 			for {
 				log.Printf("[Client] Awaiting Data From User/Process to Send to Proxy")
 				plaintext := make([]byte, 1024)
@@ -330,7 +340,7 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 				return
 			default:
 				log.Printf("Proxy : Awaiting Data From Service\n")
-				plaintext :=make([]byte, 1024)
+				plaintext := make([]byte, 1024)
 				numBytesRead, err := reader.Read(plaintext)
 				if err == io.EOF {
 					log.Printf("EOF Recieved Breaking Service Reader\n")
