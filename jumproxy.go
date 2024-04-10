@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -23,9 +22,9 @@ import (
 func generateKey(secret []byte, saltInput []byte) ([]byte, []byte) {
 	var salt []byte
 	if saltInput == nil {
-		// salt = make([]byte, 16)
-		salt = []byte("abcdef0123456789")
-		if _, err := rand.Read(salt); err != nil {
+		salt = make([]byte, 16)
+		_, err := rand.Read(salt)
+		if err != nil {
 			log.Fatalf("Error During Salt Generation for Key Generation %v", err)
 		}
 	} else {
@@ -176,7 +175,10 @@ func main() {
 	}
 
 	log.Printf("KeyFileName : %s\n", *keyFileName)
-	passphrase, err := os.ReadFile(*keyFileName)
+	passphrase, errReadKeyFile := os.ReadFile(*keyFileName)
+	if errReadKeyFile != nil {
+		log.Fatalf("Error Reading passphrase from keyfile : %v", errReadKeyFile)
+	}
 
 	/*
 		I am assuming that client is the one who always initates the connection
@@ -196,13 +198,10 @@ func main() {
 		}
 		defer proxyConn.Close()
 
-		key, keyError := hex.DecodeString("186c82651c0d565e6d56541fc614036d33e857a143d44f915cca44e3687694ee")
-		if keyError != nil {
-			log.Printf("Proxy: Error Generating Key %v", keyError)
-		}
+		key, salt := generateKey(passphrase, nil)
 
-		// write the salt as the first few bytes
-		// conn.Write(salt)
+		// write the salt as the first 16 bytes
+		proxyConn.Write(salt)
 
 		// Using WaitGroup to manage goroutines completion
 		var wg sync.WaitGroup
@@ -232,14 +231,14 @@ func main() {
 				log.Printf("[Client] Awaiting Data From User/Process to Send to Proxy")
 				plaintext := make([]byte, 1024)
 				numBytesRead, errReadBytes := reader.Read(plaintext)
-				log.Printf("[Client] Sending to Proxy: %x", string(plaintext))
 				if errReadBytes != nil {
 					log.Printf("Client [ERROR] [Reading Input From Stdin] : %v", errReadBytes)
 					break
 				}
 				plaintext = plaintext[0:numBytesRead]
+				log.Printf("[Client] Sending to Proxy: %x", plaintext)
 				sendEncrypted(proxyConn, plaintext, key)
-				log.Printf("[Client] Sent to Proxy: %x", string(plaintext))
+				log.Printf("[Client] Sent to Proxy: %x", plaintext)
 			}
 		}()
 
@@ -285,13 +284,12 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 		clientConn.Close()
 		return
 	}
-	key, keyError := hex.DecodeString("186c82651c0d565e6d56541fc614036d33e857a143d44f915cca44e3687694ee")
-	if keyError != nil {
-		log.Printf("Proxy: Error Generating Key %v", keyError)
-		clientConn.Close()
-		serviceConn.Close()
-		return
+	salt := make([]byte, 16)
+	_, errReadSalt := io.ReadFull(clientConn, salt)
+	if errReadSalt != nil {
+		log.Printf("[Proxy] Unable to read salt sent by client: %v", errReadSalt)
 	}
+	key, salt := generateKey(passphrase, salt)
 
 	exitSignal := make(chan struct{})
 	exitConfirm := make(chan struct{}, 2)
