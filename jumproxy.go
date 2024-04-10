@@ -68,7 +68,7 @@ func decrypt(ciphertext []byte, key []byte, nonce []byte) ([]byte, error) {
 		return nil, errGcm
 	}
 
-	plaintext := make([]byte, len(ciphertext))
+	var plaintext []byte
 	plaintext, errOpen := gcm.Open(plaintext, nonce, ciphertext, nil)
 	if errOpen != nil {
 		log.Printf("[decrypt] gcm.Open failed %v\n", errOpen)
@@ -112,14 +112,14 @@ func sendEncrypted(conn net.Conn, data []byte, key []byte) error {
 func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 
 	nonce := make([]byte, 12) //assuming that nonce size is 12 bytes
-	_, errReadNonce := conn.Read(nonce)
+	_, errReadNonce := io.ReadFull(conn, nonce)
 	if errReadNonce != nil {
 		log.Printf("[recieveDecrypt] Error Reading Nonce : %v\n", errReadNonce)
 		return nil, errReadNonce
 	}
 
 	cipherTextSizeBuf := make([]byte, 2)
-	_, errReadCipherTextSize := conn.Read(cipherTextSizeBuf)
+	_, errReadCipherTextSize := io.ReadFull(conn, cipherTextSizeBuf)
 	cipherTextSize := uint16(binary.BigEndian.Uint16(cipherTextSizeBuf))
 	if errReadCipherTextSize != nil {
 		log.Printf("[recieveDecrypt] Error Reading CipherTextSize : %v\n", errReadCipherTextSize)
@@ -128,13 +128,13 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 
 	// Assuming the remaining data is the ciphertext. In practice, you might want to prefix the data with its size.
 	ciphertext := make([]byte, cipherTextSize)
-	n, errReadCipherText := conn.Read(ciphertext)
+	_, errReadCipherText := io.ReadFull(conn, ciphertext)
 	if errReadCipherText != nil {
 		log.Printf("[recieveDecrypt] Error Reading CipherText : %v\n", errReadCipherText)
 		return nil, errReadCipherText
 	}
 
-	plaintext, errDecrpyt := decrypt(ciphertext[:n], key, nonce)
+	plaintext, errDecrpyt := decrypt(ciphertext, key, nonce)
 	if errDecrpyt != nil {
 		log.Printf("[recieveDecrypt] Error Decrypt : %v\n", errDecrpyt)
 		return nil, errDecrpyt
@@ -143,7 +143,17 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 }
 
 func main() {
-	logFile, errOpenLogFile := os.OpenFile("proxy-application.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	var keyFileName = flag.String("k", "mykey", "Use the ASCII text passphrase contained in <pwdfile>")
+	var listenPort = flag.Int("l", -1, "Reverse-proxy mode: listen for inbound connections on <listenport> and relay them to <destination>:<port>")
+	flag.Parse()
+
+	var fileName string
+	if *listenPort == -1 {
+		fileName = "proxy-client-application.log"
+	} else {
+		fileName = "proxy-server-application.log"
+	}
+	logFile, errOpenLogFile := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if errOpenLogFile != nil {
 		fmt.Printf("error opening log file: %v", errOpenLogFile)
 		os.Exit(1) // Exit if we cannot open the log file
@@ -152,11 +162,6 @@ func main() {
 
 	// Set the output of the standard logger to the log file
 	log.SetOutput(logFile)
-
-	var keyFileName = flag.String("k", "mykey", "Use the ASCII text passphrase contained in <pwdfile>")
-	var listenPort = flag.Int("l", -1, "Reverse-proxy mode: listen for inbound connections on <listenport> and relay them to <destination>:<port>")
-
-	flag.Parse()
 
 	var destHost = "NA"
 	var destPort = int64(-1)
@@ -185,11 +190,11 @@ func main() {
 	if *listenPort == -1 {
 		log.Printf("Client Mode\n")
 
-		conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", destHost, destPort))
+		proxyConn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", destHost, destPort))
 		if err != nil {
 			log.Fatalf("Dial failed: %v", err)
 		}
-		defer conn.Close()
+		defer proxyConn.Close()
 
 		key, keyError := hex.DecodeString("186c82651c0d565e6d56541fc614036d33e857a143d44f915cca44e3687694ee")
 		if keyError != nil {
@@ -208,8 +213,8 @@ func main() {
 			defer wg.Done()
 			for {
 				log.Printf("[Client] Awaiting Data From proxy")
-				plaintext, errRecieveDecrypt := receiveDecrypted(conn, key)
-				log.Printf("[Client] Recieved from Proxy %s", string(plaintext))
+				plaintext, errRecieveDecrypt := receiveDecrypted(proxyConn, key)
+				log.Printf("[Client] Recieved from Proxy: %x", string(plaintext))
 				if errRecieveDecrypt != nil || errRecieveDecrypt == io.EOF {
 					log.Printf("[Client] errRecieveDecrypt : %v", errRecieveDecrypt)
 					break
@@ -227,14 +232,14 @@ func main() {
 				log.Printf("[Client] Awaiting Data From User/Process to Send to Proxy")
 				plaintext := make([]byte, 1024)
 				numBytesRead, errReadBytes := reader.Read(plaintext)
-				log.Printf("[Client] Sending to Proxy: %s", string(plaintext))
+				log.Printf("[Client] Sending to Proxy: %x", string(plaintext))
 				if errReadBytes != nil {
 					log.Printf("Client [ERROR] [Reading Input From Stdin] : %v", errReadBytes)
 					break
 				}
 				plaintext = plaintext[0:numBytesRead]
-				sendEncrypted(conn, plaintext, key)
-				log.Printf("[Client] Sent to Proxy: %s", string(plaintext))
+				sendEncrypted(proxyConn, plaintext, key)
+				log.Printf("[Client] Sent to Proxy: %x", string(plaintext))
 			}
 		}()
 
@@ -303,26 +308,26 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 			case <-exitSignal: // Received exit signal from goroutine 2
 				return
 			default:
-				log.Printf("Proxy : Awaiting Data From Client\n")
+				log.Printf("[Proxy] Awaiting Data From Client\n")
 				plaintext, errRecieveDecrypt := receiveDecrypted(clientConn, key)
 				if errRecieveDecrypt == io.EOF {
-					log.Printf("EOF Recieved breaking client reader")
+					log.Printf("[Proxy] EOF Recieved breaking client reader")
 					safeClose(exitSignal)
 					break
 				}
 				if errRecieveDecrypt != nil {
-					log.Printf("Proxy [ERROR] [Recieve Data from Client]: %v", errRecieveDecrypt)
+					log.Printf("[Proxy] [ERROR] [Recieve Data from Client]: %v", errRecieveDecrypt)
 					break
 				}
-				log.Printf("Proxy : Recieved %s from service\n", plaintext)
+				log.Printf("[Proxy] Recieved from Client: %x\n", plaintext)
 				n, err := serviceConn.Write(plaintext)
 				if err != nil {
-					log.Printf("[ERROR] Proxy Client to Proxy: %v\n", err)
+					log.Printf("[Proxy] [ERROR] Proxy Client to Proxy: %v\n", err)
 					break
 				} else {
 					log.Printf("Wrote %d bytes", n)
 				}
-				log.Printf("Proxy : Sent %s to service\n", plaintext)
+				log.Printf("[Proxy] : Sent to service: %x\n", plaintext)
 			}
 		}
 	}()
@@ -339,22 +344,22 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 			case <-exitSignal: // Received exit signal from goroutine 1
 				return
 			default:
-				log.Printf("Proxy : Awaiting Data From Service\n")
+				log.Printf("[Proxy] Awaiting Data From Service\n")
 				plaintext := make([]byte, 1024)
 				numBytesRead, err := reader.Read(plaintext)
 				if err == io.EOF {
-					log.Printf("EOF Recieved Breaking Service Reader\n")
+					log.Printf("[Proxy] EOF Recieved Breaking Service Reader\n")
 					safeClose(exitSignal)
 					break
 				}
 				if err != nil {
-					log.Printf("[ERROR] Proxy Error Reading Data From Service : %v\n", err)
+					log.Printf("[Proxy] [ERROR] Proxy Error Reading Data From Service : %v\n", err)
 					break
 				}
 				plaintext = plaintext[0:numBytesRead]
-				log.Printf("Proxy : Recieved %s from Service\n", string(plaintext))
+				log.Printf("[Proxy] Recieved from Service: %x\n", (plaintext))
 				sendEncrypted(clientConn, plaintext, key)
-				log.Printf("Proxy : Sent %s to client in encrypted form\n", string(plaintext))
+				log.Printf("[Proxy] Sent to client: %x\n", (plaintext))
 			}
 		}
 	}()
