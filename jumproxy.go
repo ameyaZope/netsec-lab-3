@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	SALT_LENGTH int = 16
+	SALT_LENGTH int = 32
 	NONCE_LENGTH int = 12
 	KEY_LENGTH int = 32
 )
