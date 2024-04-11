@@ -1,5 +1,20 @@
 # JumpProxy in Golang
 
+## End to End SSH using Jumproxy.go
+1. Ensure that your ssh server is running on port 22
+2. Run the following command to start the server side jumproxy on the same machine as your ssh server. Please note that the test.txt file contains the passphrase. The below command runs the jumproxy in reverse proxy mode
+```bash
+  go run jumproxy.go -k test.txt -l 2222 localhost 22
+```
+3. Run the below command to compile the jumproxy.go file into an executable
+```bash
+  go build jumproxy.go
+```
+4. On the client machine from which you want to initiate an ssh connection, run the below command. The below command runs the jumproxy in client mode. 
+```bash
+ssh -o "ProxyCommand <Absolute Path To jumproxy executable> -k <Absolute Path to file containing passphrase> <IP Address of Host on Which SSH Server is running> 2222" <UserName for authentication>@localhost -vvv
+```
+
 ### TCP Communication over the Jump Proxy
 You need to create three things with the below code
 
