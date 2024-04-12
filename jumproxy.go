@@ -316,7 +316,6 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 			case <-exitSignal: // Received exit signal from goroutine 2
 				return
 			default:
-				log.Printf("[Proxy] Awaiting Data From Client\n")
 				plaintext, errRecieveDecrypt := receiveDecrypted(clientConn, key)
 				if errRecieveDecrypt == io.EOF {
 					log.Printf("[Proxy] EOF Recieved breaking client reader")
@@ -327,15 +326,11 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 					log.Printf("[Proxy] [ERROR] [Recieve Data from Client]: %v", errRecieveDecrypt)
 					break
 				}
-				log.Printf("[Proxy] Recieved from Client: %x\n", plaintext)
-				n, err := serviceConn.Write(plaintext)
+				_, err := serviceConn.Write(plaintext)
 				if err != nil {
 					log.Printf("[Proxy] [ERROR] Proxy Client to Proxy: %v\n", err)
 					break
-				} else {
-					log.Printf("Wrote %d bytes", n)
 				}
-				log.Printf("[Proxy] : Sent to service: %x\n", plaintext)
 			}
 		}
 	}()
@@ -352,7 +347,6 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 			case <-exitSignal: // Received exit signal from goroutine 1
 				return
 			default:
-				log.Printf("[Proxy] Awaiting Data From Service\n")
 				plaintext := make([]byte, PLAINTEXT_BLOCK_SIZE)
 				numBytesRead, err := reader.Read(plaintext)
 				if err == io.EOF {
@@ -365,14 +359,11 @@ func handleClient(clientConn net.Conn, destHost string, destPort int64, passphra
 					break
 				}
 				plaintext = plaintext[0:numBytesRead]
-				log.Printf("[Proxy] Recieved from Service: %x\n", (plaintext))
 				sendEncrypted(clientConn, plaintext, key)
-				log.Printf("[Proxy] Sent to client: %x\n", (plaintext))
 			}
 		}
 	}()
 
 	<-exitConfirm
 	<-exitConfirm
-	log.Printf("Proxy : Closing Service and Client Connections\n")
 }
