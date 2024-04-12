@@ -15,6 +15,22 @@
 ssh -o "ProxyCommand <Absolute Path To jumproxy executable> -k <Absolute Path to file containing passphrase> <IP Address of Host on Which SSH Server is running> 2222" <UserName for authentication>@localhost -vvv
 ```
 
+## End to End TCP Connection Encrypted via Jumproxy
+1. Run a plain TCP server using either ***nc*** or ***ncat***. Use any one of the two below commands, I would prefer the ncat command, the reason for the same is given at the end of the README.md
+```bash
+ncat -lkv 9090 
+nc -lkv -p 9090
+```
+2. Run the jumproxy server using the below command
+```bash
+go run jumproxy.go -k test.txt -l 2222 localhost 9090
+```
+3. Run the jumproxy client using the below command
+```bash
+go run jumproxy.go -k test.txt <IP_Address_Of_Machine_On_Which_Jumproxy_Server_Is_Running> 2222
+```
+The above would open a fully encrypted, fully duplex connection to the ncat server. This is like a two way chat application. My application supports multiple clients running together. Whenever multiple clients are running together and you type something on the ncat server console, it is broadcasted to all clients. 
+
 ### TCP Communication over the Jump Proxy
 You need to create three things with the below code
 
