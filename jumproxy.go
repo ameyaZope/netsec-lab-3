@@ -81,7 +81,7 @@ func decrypt(ciphertext []byte, key []byte, nonce []byte) ([]byte, error) {
 	plaintext, errOpen := gcm.Open(plaintext, nonce, ciphertext, nil)
 	if errOpen != nil {
 		log.Printf("[decrypt] gcm.Open failed %v\n", errOpen)
-		log.Fatalf("[decrypt] ciphertext=%x key=%x nonce=%x\n", ciphertext, key, nonce)
+		log.Printf("[decrypt] ciphertext=%x key=%x nonce=%x\n", ciphertext, key, nonce)
 		return nil, errOpen
 	}
 	return plaintext, nil
