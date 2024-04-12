@@ -70,7 +70,7 @@ that does not suffer from memory corruption bugs.
 The usage of jumproxy assumes that the passphrase is securely made available on both the client and the target machine. The passphrase is then used to derive a key based on a nonce that is salt chosen by the client. This salt is then passed to the jumproxy-server in plaintext as the first few bytes of the communication. The jumproxy-server then uses the salt with the passphrase to derive the same key that the client had generated. 
 
 ### Subsequent Communication
-Once the key has been established the subsequent communication starts. In this communication we use AES-256 in GCM mode to encrypt the communication. 
+Once the key has been established the subsequent communication starts. In this communication we use AES-256 in GCM mode to encrypt the communication. The nonce generation for the subsequent communication happens via the crypto/rand library which generates a CSPRNG. The CSPRNG from the crypto/rand generates random numbers from the operating systems entropy source and does not need to be manually seeded. Note that since the nonce is 12 Byte(96 bits) long and since we are using a CSPRNG, the the chances of the random number generator repeating the generated random number are approaching zero. 
 
 
 ## Creation of Application Layer Protocol
