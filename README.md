@@ -1,5 +1,15 @@
 # JumpProxy in Golang
 
+## Brief Description of Program
+
+This Go program implements an encrypted network proxy that can operate in both client and server modes. It utilizes AES-GCM for encryption to ensure confidentiality and integrity of the data transmitted over the network. Key derivation is performed using PBKDF2 with a SHA-256 hash function, ensuring secure key generation from a passphrase.
+
+The program defines constants for cryptographic parameters like salt, nonce, and key lengths, as well as a block size for plaintext data handling. Key functions include generateKey for deriving a secure key from a passphrase and salt, encrypt and decrypt for handling data encryption and decryption respectively, and sendEncrypted and receiveDecrypted for sending and receiving encrypted data over a network connection.
+
+The main execution starts by parsing command line arguments to determine the operation mode (client or server) and necessary parameters such as key file and network ports. In client mode, the program establishes a TCP connection to a specified destination, generates an encryption key, and handles data transmission and reception using separate goroutines to maintain asynchronous input/output. In server mode, it listens for incoming connections and relays decrypted client data to a specified destination server.
+
+Error handling is robust, with checks at every step where an operation might fail, including file and network operations. The use of logging is extensive, providing detailed error messages and operational status, which are directed to specific log files depending on the mode of operation. 
+
 ## Usage 
 
 ### End to End SSH using Jumproxy.go
