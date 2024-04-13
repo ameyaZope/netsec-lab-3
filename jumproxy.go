@@ -135,7 +135,6 @@ func receiveDecrypted(conn net.Conn, key []byte) ([]byte, error) {
 		return nil, errReadCipherTextSize
 	}
 
-	// Assuming the remaining data is the ciphertext. In practice, you might want to prefix the data with its size.
 	ciphertext := make([]byte, cipherTextSize)
 	_, errReadCipherText := io.ReadFull(conn, ciphertext)
 	if errReadCipherText != nil {
